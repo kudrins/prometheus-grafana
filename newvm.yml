@@ -1,0 +1,111 @@
+---
+- name: start VM 
+  hosts: localhost
+  vars_files: vars.yml
+  become: false
+  gather_facts: false
+  collections:
+    - community.vmware
+
+  tasks:
+  - name: deploy VM
+    vmware_guest: 
+      hostname: "{{ vcenter_hostname }}"
+      username: "{{ vcenter_username }}"
+      password: "{{ vcenter_password }}"
+      validate_certs: False
+      datacenter: Datacenter
+      datastore: datastore_6TB
+      folder: centos
+      template: t_centos8
+      name: centos8-prometheus
+      hardware:
+        nested_virt: true
+        memory_mb: 4096
+      networks:
+        - name: VMs11
+          ip: "10.100.11.108"
+          netmask: "255.255.255.0"
+          gateway: "10.100.11.254"
+      customization:
+        hostname: "centos-prometheus"
+        dns_servers: [8.8.8.8]
+      state: powered-on
+      wait_for_ip_address: true
+    register: deploy
+    delegate_to: localhost
+    tags:
+    - install
+
+- name: copy files
+  hosts: centos8prometheus
+  become: true 
+  gather_facts: false
+
+  tasks:
+  - name: copy yml files
+    copy:
+      src: "{{item}}"
+      dest: /etc/prometheus/
+    with_items:
+      - prometheus.yml
+      - rules.yml
+
+  - name: copy bash files
+    copy:
+      src: "{{item}}"
+      dest: /root/
+      mode: 0744
+    with_items:
+      - alert_manager.sh
+      - grafana.sh
+      - node_exporter.sh
+      - prometheus_install.sh
+      - start.sh
+
+  - name: copy service files
+    copy:
+      src: "{{item}}"
+      dest: /etc/systemd/system/
+    with_items:
+      - prometheus.service
+      - node_exporter.service
+      - alertmanager.service
+
+  - name: copy rpm file
+    copy:
+      src: grafana_enterprise_9.5.2_1.x86_64.rpm
+      dest: /root
+  tags:
+    - copy
+
+- name: installation
+  hosts: centos8prometheus
+  become: true 
+  gather_facts: false
+
+  tasks:
+  - name: install prometheus
+    shell: ./prometheus_install.sh
+    tags:
+      - prometheus
+
+  - name: install node_exporter
+    shell: ./node_exporter.sh
+    tags:
+      - node_exporter
+
+  - name: install alert_manager
+    shell: ./alert_manager.sh
+    tags:
+      - alert_manager
+
+  - name: install grafana
+    shell: ./grafana.sh
+    tags:
+      - grafana
+
+  - name: start services
+    shell: ./start.sh
+    tags:
+      - start
